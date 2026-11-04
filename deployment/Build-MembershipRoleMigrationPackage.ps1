@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\membership-role-migration-v1')
+    [string]$PackageName = 'lsmon-membership-role-migration-v2',
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\membership-role-migration-v2')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +16,7 @@ foreach ($path in @($migration, $activator)) {
 }
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
-$stage = Join-Path $OutputDirectory 'lsmon-membership-role-migration-v1'
+$stage = Join-Path $OutputDirectory $PackageName
 Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $stage | Out-Null
 
@@ -39,11 +40,11 @@ Wazuh, GLPI, Acronis, Cloudflare, ports, endpoints, or credentials.
 '@
 Set-Content -LiteralPath (Join-Path $stage 'README.txt') -Value $readme -NoNewline
 
-$archive = Join-Path $OutputDirectory 'lsmon-membership-role-migration-v1.tar.gz'
+$archive = Join-Path $OutputDirectory "$PackageName.tar.gz"
 $checksum = "$archive.sha256"
 Remove-Item -LiteralPath $archive,$checksum -Force -ErrorAction SilentlyContinue
 
-& tar.exe -C $OutputDirectory -czf $archive 'lsmon-membership-role-migration-v1'
+& tar.exe -C $OutputDirectory -czf $archive $PackageName
 if ($LASTEXITCODE -ne 0) { throw 'tar archive creation failed.' }
 
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
