@@ -73,6 +73,7 @@ class GlpiComputer:
     model: str = ""
     operating_system: str = ""
     location_name: str = ""
+    entity_name: str = ""
     primary_ip: str = ""
     fqdn: str = ""
     status: str = "unknown"
@@ -175,6 +176,7 @@ class GlpiReadOnlyAdapter:
             model=cls._text(item.get("computermodels_id")),
             operating_system=cls._text(item.get("operatingsystems_id")),
             location_name=cls._text(item.get("locations_id")),
+            entity_name=cls._text(item.get("entities_id")),
             primary_ip=primary_ip,
             fqdn=cls._text(item.get("fqdn")),
             status=cls._text(item.get("states_id")) or "unknown",
@@ -191,6 +193,24 @@ class GlpiReadOnlyAdapter:
         if detailed is None or detailed.external_id != computer.external_id:
             raise GlpiApiError("GLPI Computer detail response has an unexpected format")
         return detailed
+
+    def get_computer(self, external_id):
+        """Return one GLPI Computer by its ID using a GET-only request.
+
+        This supports a narrow post-enrollment routing check without listing
+        other customer assets or altering GLPI or portal state.
+        """
+        if not self.session_token:
+            raise GlpiApiError("GLPI session is not open")
+        item = self._request(
+            f"Computer/{str(external_id).strip()}",
+            headers={"Session-Token": self.session_token},
+            query={"expand_dropdowns": "true"},
+        )
+        computer = self._computer(item)
+        if computer is None or computer.external_id != str(external_id).strip():
+            raise GlpiApiError("GLPI Computer response has an unexpected format")
+        return computer
 
     def list_computers(self, limit=None):
         if not self.session_token:

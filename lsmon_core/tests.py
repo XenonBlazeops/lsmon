@@ -284,6 +284,31 @@ class TenantBoundaryTests(TestCase):
         ).open()
         self.assertEqual(captured["User-agent"], "LSMON-GLPI-ReadOnly/1.0")
 
+    def test_glpi_routing_verification_reads_one_computer_without_writing_portal_state(self):
+        InventoryConnector.objects.create(
+            tenant=self.tenant_a, provider=InventoryConnector.Provider.GLPI,
+            base_url="https://glpi.example.test", credential_reference="LSMON_GLPI_A_ROUTE", scope="Entity A",
+        )
+        from .glpi_sync import GlpiComputer
+        adapter = __import__("unittest.mock", fromlist=["MagicMock"]).MagicMock()
+        adapter.get_computer.return_value = GlpiComputer(
+            external_id="9001", name="Fresh-endpoint", entity_name="Tecstaq",
+        )
+        before_runs = InventorySyncRun.objects.count()
+        with patch("lsmon_core.management.commands.verify_glpi_routing.GlpiReadOnlyAdapter", return_value=adapter), patch.dict(
+            "os.environ", {"LSMON_GLPI_SYNC_SECRET_LSMON_GLPI_A_ROUTE": '{"app_token":"app","user_token":"user"}'}, clear=False,
+        ):
+            output = StringIO()
+            call_command(
+                "verify_glpi_routing", "--tenant-slug", "a", "--glpi-computer-id", "9001",
+                "--expected-entity", "tecstaq", stdout=output,
+            )
+        self.assertIn("GLPI_ROUTING_VERIFIED tenant=a computer_id=9001", output.getvalue())
+        self.assertEqual(InventorySyncRun.objects.count(), before_runs)
+        adapter.open.assert_called_once()
+        adapter.get_computer.assert_called_once_with("9001")
+        adapter.close.assert_called_once()
+
     def test_glpi_full_apply_rebuilds_software_only_after_successful_full_read(self):
         InventoryConnector.objects.create(
             tenant=self.tenant_a, provider=InventoryConnector.Provider.GLPI,
