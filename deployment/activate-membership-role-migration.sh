@@ -53,7 +53,8 @@ PORTAL_DB="$(
 [[ -n $PORTAL_DB ]] || fail 'Could not determine the portal database name.'
 
 echo '=== Creating PostgreSQL rollback dump ==='
-runuser -u postgres -- pg_dump --format=custom --file="$DATABASE_DUMP" "$PORTAL_DB"
+# Root opens the root-only backup file; pg_dump itself still runs as postgres.
+runuser -u postgres -- pg_dump --format=custom "$PORTAL_DB" > "$DATABASE_DUMP"
 chmod 0600 "$DATABASE_DUMP"
 
 echo '=== Installing the single migration file ==='
