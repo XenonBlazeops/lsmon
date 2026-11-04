@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block title %}Agent enrollment · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header>
+  <div>
+    <p class="eyebrow">{{ tenant.name }} workspace</p>
+    <h1>Agent enrollment</h1>
+    <p class="sub">Request an endpoint enrollment for this tenant only.</p>
+  </div>
+  <a class="button secondary" href="{% url 'tenant_home' tenant.slug %}">Back to workspace</a>
+</header>
+<section class="panel">
+  <div class="panel-head"><h2>New enrollment request</h2><span>Self-service</span></div>
+  <p>For an approved package, a tenant-scoped installer is made ready immediately. It contains a short-lived one-time registration code; protected configuration is delivered only after the endpoint validates that code.</p>
+  <form method="post" class="form-stack">{% csrf_token %}{{ form.as_p }}<button type="submit">Create enrollment request</button></form>
+</section>
+<section class="panel">
+  <div class="panel-head"><h2>Your requests</h2><span>{{ enrollments|length }}</span></div>
+  {% if enrollments %}
+    <table><thead><tr><th>Operating system</th><th>Package</th><th>Status</th><th>Requested</th><th>Expires</th><th>Installer</th></tr></thead><tbody>{% for enrollment in enrollments %}<tr><td>{{ enrollment.get_operating_system_display }}</td><td>{% if enrollment.package %}{{ enrollment.package.get_vendor_display }} {{ enrollment.package.version }}{% else %}—{% endif %}</td><td>{{ enrollment.get_status_display }}</td><td>{{ enrollment.created_at }}</td><td>{{ enrollment.expires_at }}</td><td>{% if enrollment.status == 'ready' and enrollment.package and enrollment.operating_system == 'windows' %}{% if enrollment.package.vendor == 'glpi' and not enrollment.registration_code_hash %}<form method="post" action="{% url 'issue_registration_code' tenant.slug enrollment.id %}">{% csrf_token %}<button type="submit">Use pilot Windows EXE</button></form><small>Lab-only GLPI pilot executable.</small>{% endif %}<form method="post" action="{% url 'download_single_file_windows_installer' tenant.slug enrollment.id %}">{% csrf_token %}<button type="submit">{% if enrollment.registration_code_hash %}Replace{% else %}Download{% endif %} one-file Windows installer</button></form>{% elif enrollment.status == 'ready' and enrollment.package and enrollment.operating_system == 'linux' %}<form method="post" action="{% url 'download_single_file_linux_installer' tenant.slug enrollment.id %}">{% csrf_token %}<button type="submit">{% if enrollment.registration_code_hash %}Replace{% else %}Download{% endif %} one-file Linux installer</button></form><small>Runs with sudo and verifies the approved package checksum before installation.</small>{% elif enrollment.status == 'ready' and enrollment.package %}Installer issued{% elif enrollment.status == 'ready' %}Legacy request — create a catalog-bound request{% else %}Not available{% endif %}</td></tr>{% endfor %}</tbody></table>
+  {% else %}<p>No enrollment requests have been created for {{ tenant.name }}.</p>{% endif %}
+</section>
+{% endblock %}

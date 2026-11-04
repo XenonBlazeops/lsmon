@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily LSMON read-only GLPI refresh for Tecstaq
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+RandomizedDelaySec=10min
+Persistent=true
+Unit=lsmon-glpi-sync@tecstaq.service
+
+[Install]
+WantedBy=timers.target
+

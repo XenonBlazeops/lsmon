@@ -1,0 +1,20 @@
+[Unit]
+Description=LSMON privileged provisioner preflight for tenant %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lsmon-provisioner
+Group=lsmon-provisioner
+EnvironmentFile=/etc/lsmon/provisioner.env
+WorkingDirectory=/opt/lsmon-portal
+ExecStart=/opt/lsmon-portal/venv/bin/python /opt/lsmon-portal/manage.py verify_agent_provisioning_prerequisites --tenant-slug %i
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/lsmon-provisioner
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes

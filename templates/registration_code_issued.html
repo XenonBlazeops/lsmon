@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+{% block title %}Registration code · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} workspace</p><h1>Registration code issued</h1><p class="sub">Use this code only with the approved enrollment bootstrap.</p></div></header>
+<section class="panel">
+  <p><strong>Copy this code now.</strong> It is shown once and is not stored in readable form.</p>
+  <p><strong>Enrollment ID:</strong> <code>{{ enrollment.id }}</code></p>
+  <p class="registration-code">{{ registration_code }}</p>
+  <p>It expires with this enrollment at {{ enrollment.expires_at }}. It does not contain a GLPI credential and cannot itself submit inventory.</p>
+  {% if enrollment.operating_system == 'windows' %}
+  <p><strong>Pilot EXE (controlled devices only):</strong> first install the public test certificate into the device's Trusted Root Certification Authorities and Trusted Publishers stores. Then download and run the signed EXE, entering the enrollment ID and code above. The EXE retrieves the approved package only after validation.</p>
+  <p><a class="button secondary" href="{% url 'download_pilot_windows_certificate' tenant.slug %}">Download pilot public certificate (.cer)</a>
+  <a class="button" href="{% url 'download_pilot_windows_bootstrapper' tenant.slug %}">Download pilot Windows EXE</a></p>
+  {% endif %}
+  <a class="button secondary" href="{% url 'agent_enrollments' tenant.slug %}">Return to enrollment requests</a>
+</section>
+{% endblock %}

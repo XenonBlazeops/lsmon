@@ -1,0 +1,4 @@
+Django==5.2.18
+cryptography>=45,<47
+gunicorn==23.0.0
+pyotp==2.9.0

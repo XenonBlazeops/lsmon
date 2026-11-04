@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Edit criterion · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} compliance</p><h1>Edit criterion</h1><p class="sub">Changes affect portal-only evaluation after the next compliance recalculation.</p></div></header>
+<section class="panel form-panel"><h2>{{ rule.name }}</h2><form method="post">{% csrf_token %}{% for field in form %}<p>{{ field.label_tag }}{{ field }}{% if field.help_text %}<br><span class="muted">{{ field.help_text }}</span>{% endif %}{{ field.errors }}</p>{% endfor %}<button type="submit">Save changes</button> <a class="button secondary" href="{% url 'compliance_rules' tenant.slug %}">Cancel</a></form></section>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Agent provisioning · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">Provider-only operations</p><h1>{{ tenant.name }} agent provisioning</h1><p class="sub">Configure references only. Do not enter a credential value.</p></div><a class="button secondary" href="{% url 'enrollment_queue' %}">Back to queue</a></header>
+<section class="panel"><p>This record is server-side provisioning metadata. Saving it does not contact GLPI, retrieve a secret, create an OAuth client, or issue an agent package.</p><form method="post" class="form-stack">{% csrf_token %}{{ form.as_p }}<button type="submit">Save provisioning references</button></form></section>
+{% endblock %}

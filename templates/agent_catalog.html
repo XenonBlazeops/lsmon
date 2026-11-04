@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}Agent catalog · TecstaqOps{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">Provider-only operations</p><h1>Agent catalog</h1><p class="sub">Approve vendor packages once before making them available to tenant enrollment requests.</p></div></header>
+<section class="panel"><div class="panel-head"><h2>Add or approve a package</h2><span>Metadata only</span></div><p>The portal stores the vendor HTTPS source, version, checksum and publisher expectation—not a vendor binary or any credential.</p><form method="post" class="form-stack">{% csrf_token %}{{ form.as_p }}<button type="submit">Save package</button></form></section>
+<section class="panel"><div class="panel-head"><h2>Catalog releases</h2><span>{{ packages|length }}</span></div>{% if packages %}<table><thead><tr><th>Vendor</th><th>OS</th><th>Version</th><th>Integrity</th><th>Status</th></tr></thead><tbody>{% for package in packages %}<tr><td>{{ package.get_vendor_display }}</td><td>{{ package.get_operating_system_display }}</td><td>{{ package.version }}</td><td><code>{{ package.sha256 }}</code><br>{{ package.expected_publisher|default:"Publisher not recorded" }}</td><td>{{ package.get_status_display }}</td></tr>{% endfor %}</tbody></table>{% else %}<p>No packages have been recorded.</p>{% endif %}</section>
+{% endblock %}

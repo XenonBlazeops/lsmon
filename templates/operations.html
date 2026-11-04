@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block content %}
+<header>
+  <div>
+    <p class="eyebrow">Provider-only operations</p>
+    <h1>NOC / SOC security posture</h1>
+    <p class="sub">A read-only, tenant-safe summary of Wazuh alerts from configured customer security scopes.</p>
+  </div>
+  <span class="status-chip">Last 24 hours</span>
+</header>
+<section class="metrics">
+  <article><span>Critical</span><strong>{{ security_findings.critical }}</strong><small>Rule level 15 or higher</small></article>
+  <article><span>High</span><strong>{{ security_findings.high }}</strong><small>Rule levels 12 to 14</small></article>
+  <article><span>Medium</span><strong>{{ security_findings.medium }}</strong><small>Rule levels 7 to 11</small></article>
+  <article><span>Low</span><strong>{{ security_findings.low }}</strong><small>Rule levels 0 to 6</small></article>
+</section>
+<section class="panel">
+  <div class="panel-head">
+    <h2>Tenant security findings</h2>
+    <span>{{ security_findings.attention_tenants }} requiring review · {{ security_findings.available_tenants }}/{{ security_findings.configured_tenants }} readers available</span>
+  </div>
+  {% if security_findings.tenants %}
+  <table>
+    <thead><tr><th>Tenant</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Attention</th><th>Reader status</th></tr></thead>
+    <tbody>{% for tenant in security_findings.tenants %}
+      <tr><td><a href="{% url 'tenant_home' tenant.slug %}">{{ tenant.name }}</a></td><td>{{ tenant.critical }}</td><td>{{ tenant.high }}</td><td>{{ tenant.medium }}</td><td>{{ tenant.low }}</td><td>{{ tenant.attention }}</td><td>{% if tenant.state == 'ready' %}Available{% else %}Unavailable{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}
+  <div class="empty"><h2>No tenant security readers configured</h2><p class="muted">Counts appear here after a tenant receives a provider-managed, document-restricted Wazuh Indexer reader.</p></div>
+  {% endif %}
+  <p class="muted" style="margin:18px 0 0">Each row is calculated using that tenant’s dedicated Indexer identity and approved agent-ID restriction. This page exposes counts only—never raw events, credentials, or the Wazuh dashboard.</p>
+</section>
+<section class="panel">
+  <div class="panel-head">
+    <h2>Tenant security freshness</h2>
+    <span>{{ security_freshness.available_tenants }}/{{ security_freshness.configured_tenants }} readers available</span>
+  </div>
+  <p><strong>{{ security_freshness.current }} current</strong> · {{ security_freshness.stale }} stale · {{ security_freshness.not_reported }} not reported · {{ security_freshness.unavailable }} unavailable across {{ security_freshness.agent_count }} enrolled endpoint{{ security_freshness.agent_count|pluralize }}.</p>
+  {% if security_freshness.tenants %}
+  <table>
+    <thead><tr><th>Tenant</th><th>Endpoints</th><th>Current</th><th>Stale</th><th>Not reported</th><th>Unavailable</th><th>Attention</th><th>Reader status</th></tr></thead>
+    <tbody>{% for tenant in security_freshness.tenants %}
+      <tr><td><a href="{% url 'tenant_home' tenant.slug %}">{{ tenant.name }}</a></td><td>{{ tenant.agent_count }}</td><td>{{ tenant.current }}</td><td>{{ tenant.stale }}</td><td>{{ tenant.not_reported }}</td><td>{{ tenant.unavailable }}</td><td>{{ tenant.attention }}</td><td>{% if tenant.state == 'ready' %}Available{% else %}Unavailable{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  {% else %}
+  <div class="empty"><h2>No tenant scan-state readers configured</h2><p class="muted">Freshness appears after the provider configures a tenant-scoped Wazuh reader with scan-state access.</p></div>
+  {% endif %}
+  <p class="muted" style="margin:18px 0 0">Each row is calculated through that tenant’s dedicated Wazuh reader and approved agent group. This provider view exposes aggregate counts only—never agent names, SCA checks, FIM paths, scan bodies, credentials, or the Wazuh console.</p>
+</section>
+{% endblock %}

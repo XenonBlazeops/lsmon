@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+{% block title %}{{ asset.name }} · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} inventory</p><h1>{{ asset.name }}</h1><p class="sub">Read-only inventory observed from {{ asset.get_collection_method_display }}.</p></div><div>{% if can_manage_assets %}<a class="button" href="{% url 'asset_placement' tenant.slug asset.id %}">Organise asset</a> {% endif %}<a class="button secondary" href="{% url 'asset_list' tenant.slug %}">Back to assets</a></div></header>
+<section class="panel"><h2>Asset details</h2><table><tbody>
+<tr><th>Type</th><td>{{ asset.asset_type }}</td><th>Status</th><td>{{ asset.status }}</td></tr>
+<tr><th>Manufacturer / model</th><td>{{ asset.manufacturer|default:"—" }} {{ asset.model }}</td><th>Serial number</th><td>{{ asset.serial_number|default:"—" }}</td></tr>
+<tr><th>Customer location</th><td>{{ asset.assigned_location|default:"—" }}</td><th>Department</th><td>{{ asset.department|default:"—" }}</td></tr>
+<tr><th>Business unit</th><td>{{ asset.business_unit|default:"—" }}</td><th>GLPI-reported location</th><td>{{ asset.location|default:asset.site|default:"—" }}</td></tr>
+<tr><th>Customer local IP</th><td>{{ asset.local_ip|default:"—" }}</td><th>GLPI-observed IP</th><td>{{ asset.primary_ip|default:"—" }}</td></tr>
+<tr><th>FQDN</th><td colspan="3">{{ asset.fqdn|default:"—" }}</td></tr>
+<tr><th>Operating system</th><td colspan="3">{{ asset.operating_system|default:"—" }}</td></tr>
+<tr><th>Inventory freshness</th><td>{% if inventory_freshness == "current" %}Current{% elif inventory_freshness == "stale" %}Refresh overdue{% else %}Not reported{% endif %}</td><th>Last GLPI observation</th><td>{{ glpi_last_seen|default:"—" }}</td></tr>
+</tbody></table></section>
+<section class="panel"><h2>Network interfaces</h2><p class="sub">Read-only NIC and IP observations imported from GLPI during the latest full inventory refresh.</p>{% if network_interfaces %}<table><thead><tr><th>Interface</th><th>MAC address</th><th>Network</th><th>IP addresses</th></tr></thead><tbody>{% for interface in network_interfaces %}<tr><td>{{ interface.name|default:"—" }}</td><td>{{ interface.mac_address|default:"—" }}</td><td>{{ interface.network_name|default:"—" }}</td><td>{% for address in interface.ip_addresses %}{{ address }}{% if not forloop.last %}<br>{% endif %}{% empty %}—{% endfor %}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty"><p>No GLPI network-interface inventory has been observed for this asset yet.</p></div>{% endif %}</section>
+<section class="panel"><h2>Compliance</h2>{% if compliance %}<p><strong>{{ compliance.get_status_display }}</strong>{% if compliance.checked_at %} <span class="muted">checked {{ compliance.checked_at }}</span>{% endif %}</p>{% if compliance.missing %}<p><strong>Missing required software:</strong> {{ compliance.missing }}</p>{% endif %}{% if compliance.prohibited %}<p><strong>Prohibited software:</strong> {{ compliance.prohibited }}</p>{% endif %}{% if compliance.unapproved %}<p><strong>Unapproved software:</strong> {{ compliance.unapproved }}</p>{% endif %}{% else %}<p class="muted">No compliance assessment has been run for this asset.</p>{% endif %}</section>
+<section class="panel"><h2>Installed software</h2><p class="sub">Software is observed from GLPI. This view does not alter the device or GLPI.</p>{% if software %}<table><thead><tr><th>Application</th><th>Version</th></tr></thead><tbody>{% for item in software %}<tr><td>{{ item.name }}</td><td>{{ item.version|default:"—" }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty"><p>No installed-software inventory has been observed for this asset yet.</p></div>{% endif %}</section>
+{% endblock %}

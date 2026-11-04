@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Enrollment queue · TecstaqOps{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">Provider-only operations</p><h1>Enrollment queue</h1><p class="sub">Approve or revoke tenant-scoped enrollment requests before any future provisioning step.</p></div></header>
+<section class="panel">
+  {% if enrollments %}
+  <table><thead><tr><th>Tenant</th><th>Operating system</th><th>Requested by</th><th>Status</th><th>Expires</th><th>Action</th></tr></thead><tbody>
+  {% for enrollment in enrollments %}<tr><td>{{ enrollment.tenant.name }}<br><a href="{% url 'tenant_agent_provisioning' enrollment.tenant.slug %}">Provisioning</a></td><td>{{ enrollment.get_operating_system_display }}</td><td>{{ enrollment.requested_by.get_username }}</td><td>{{ enrollment.get_status_display }}</td><td>{{ enrollment.expires_at }}</td><td>{% if enrollment.status == 'requested' %}<form method="post" action="{% url 'enrollment_action' enrollment.id 'approve' %}">{% csrf_token %}<button type="submit">Approve</button></form>{% elif enrollment.status == 'provisioning' %}<form method="post" action="{% url 'enrollment_action' enrollment.id 'prepare' %}">{% csrf_token %}<button type="submit">Prepare bootstrap</button></form>{% endif %}{% if enrollment.status != 'revoked' and enrollment.status != 'enrolled' and enrollment.status != 'expired' %}<form method="post" action="{% url 'enrollment_action' enrollment.id 'revoke' %}">{% csrf_token %}<button class="secondary" type="submit">Revoke</button></form>{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p>No tenant enrollment requests are awaiting provider review.</p>{% endif %}
+</section>
+{% endblock %}

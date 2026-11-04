@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Wazuh security · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} security integration</p><h1>Wazuh security source</h1><p class="sub">Save the tenant's approved Wazuh scope and a reference to a server-held read-only credential. This page never stores or displays a Wazuh password or API token.</p></div><span class="status-chip">Configuration only</span></header>
+<section class="panel form-panel"><form method="post" class="login-form">{% csrf_token %}{{ form.as_p }}<button type="submit">Save Wazuh configuration</button></form>{% if connector %}<p class="microcopy">Saved {{ connector.updated_at }}. No Wazuh connection has been made yet; a later read-only integration stage will verify this scope and import only tenant-scoped security summaries.</p>{% endif %}</section>
+{% endblock %}

@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}Organise {{ asset.name }} · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} inventory</p><h1>Organise {{ asset.name }}</h1><p class="sub">These are portal-managed operational assignments. They do not change GLPI and remain in place during later GLPI imports.</p></div><a class="button secondary" href="{% url 'asset_detail' tenant.slug asset.id %}">Back to asset</a></header>
+<section class="panel"><h2>Source details</h2><table><tbody><tr><th>GLPI-reported location</th><td>{{ asset.location|default:asset.site|default:"—" }}</td></tr><tr><th>GLPI-observed IP</th><td>{{ asset.primary_ip|default:"—" }}</td></tr></tbody></table></section>
+<section class="panel form-panel"><h2>Customer placement</h2><form method="post" class="login-form">{% csrf_token %}{{ form.as_p }}<button type="submit">Save placement</button></form></section>
+{% endblock %}

@@ -1,0 +1,44 @@
+# Python build and test output
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Python environments
+venv/
+.venv/
+env/
+
+# Local databases and runtime state
+*.sqlite3
+*.sqlite
+*.db
+*.log
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
+*.p12
+*.pfx
+
+# Generated deployment packages and local artifacts
+artifacts/
+dist/
+build/
+bootstrapper/*.exe
+bootstrapper/*.msi
+*.tar.gz
+*.zip
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

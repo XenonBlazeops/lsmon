@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Compliance activity · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} compliance</p><h1>Compliance activity</h1><p class="sub">Tenant-scoped, portal-only evidence of criterion changes and manual recalculations. It never includes GLPI credentials or endpoint changes.</p></div><a class="button secondary" href="{% url 'compliance_rules' tenant.slug %}">Manage criteria</a></header>
+<section class="panel">{% if events %}<table><thead><tr><th>When</th><th>Activity</th><th>Criterion</th><th>Actor</th><th>Summary</th></tr></thead><tbody>{% for event in events %}<tr><td>{{ event.created_at }}</td><td>{{ event.get_action_display }}</td><td>{{ event.criterion_name|default:"—" }}</td><td>{% if event.actor %}{{ event.actor.get_username }}{% else %}System{% endif %}</td><td>{{ event.summary }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty"><h2>No activity recorded yet</h2><p class="muted">The next criterion change or portal recalculation will be recorded here.</p></div>{% endif %}</section>
+{% endblock %}

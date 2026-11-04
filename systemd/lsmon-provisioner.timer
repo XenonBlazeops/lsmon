@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule LSMON privileged agent-provisioning worker
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=lsmon-provisioner.service
+
+[Install]
+WantedBy=timers.target

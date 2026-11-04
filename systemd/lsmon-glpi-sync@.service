@@ -1,0 +1,25 @@
+[Unit]
+Description=LSMON read-only GLPI full inventory and compliance refresh for tenant %i
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/opt/lsmon-portal
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=/etc/lsmon/portal.env
+EnvironmentFile=/etc/lsmon/glpi-sync.env
+ExecStart=/opt/lsmon-portal/venv/bin/python /opt/lsmon-portal/manage.py sync_glpi_assets --tenant-slug %i --limit 100 --full --apply
+ExecStart=/opt/lsmon-portal/venv/bin/python /opt/lsmon-portal/manage.py evaluate_software_compliance --tenant-slug %i
+TimeoutStartSec=30min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+

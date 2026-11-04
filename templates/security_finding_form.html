@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Add security finding · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">Provider workflow · {{ tenant.name }}</p><h1>Add normalized finding</h1><p class="sub">Record safe, tenant-scoped metadata only. This does not contact a source system, run a scan, or create a remediation job.</p></div><a class="button secondary" href="{% url 'security_findings' tenant.slug %}">Back to findings</a></header>
+<section class="panel form-panel"><form method="post" class="login-form">{% csrf_token %}{{ form.as_p }}<button type="submit">Create finding</button></form></section>
+{% endblock %}

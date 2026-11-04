@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Inventory activity · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} inventory</p><h1>Inventory activity</h1><p class="sub">Tenant-scoped history of portal-recorded, read-only GLPI import attempts. This page never starts a sync or changes GLPI.</p></div><a class="button secondary" href="{% url 'asset_list' tenant.slug %}">View assets</a></header>
+<section class="panel">{% if runs %}<table><thead><tr><th>Started</th><th>Outcome</th><th>Discovered</th><th>Created</th><th>Updated</th><th>Review</th><th>Completed</th><th>Safe summary</th></tr></thead><tbody>{% for run in runs %}<tr><td>{{ run.started_at }}</td><td>{{ run.get_status_display }}</td><td>{{ run.discovered_count }}</td><td>{{ run.created_count }}</td><td>{{ run.updated_count }}</td><td>{{ run.review_count }}</td><td>{{ run.completed_at|default:"—" }}</td><td>{{ run.summary|default:run.error_code|default:"—" }}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty"><h2>No inventory activity recorded yet</h2><p class="muted">A provider-run GLPI preview or import will appear here after it completes.</p></div>{% endif %}</section>
+{% endblock %}

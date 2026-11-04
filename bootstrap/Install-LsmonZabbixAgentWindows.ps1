@@ -1,0 +1,31 @@
+[CmdletBinding()]
+param([Parameter(Mandatory=$true)][string]$ManifestPath,[Parameter(Mandatory=$true)][string]$RegistrationCode,[ValidateRange(60,900)][int]$DeliveryWaitSeconds=600)
+$ErrorActionPreference='Stop'
+function Fail([string]$Message){throw "LSMON Zabbix bootstrap stopped: $Message"}
+function B64Url([byte[]]$Bytes){([Convert]::ToBase64String($Bytes)).TrimEnd('=').Replace('+','-').Replace('/','_')}
+function FromB64Url([string]$Value){$v=$Value.Replace('-','+').Replace('_','/');$v+='='*((4-$v.Length%4)%4);[Convert]::FromBase64String($v)}
+function FixedTimeEquals([byte[]]$Left,[byte[]]$Right){if($Left.Length -ne $Right.Length){return $false};$d=0;for($i=0;$i -lt $Left.Length;$i++){$d=$d -bor($Left[$i]-bxor$Right[$i])};$d -eq 0}
+if(-not([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){Fail 'Run this installer from an elevated PowerShell session.'}
+if(-not(Test-Path -LiteralPath $ManifestPath -PathType Leaf)){Fail 'Manifest file not found.'}
+$manifest=Get-Content -LiteralPath $ManifestPath -Raw|ConvertFrom-Json
+if($manifest.kind -ne 'lsmon-agent-bootstrap-manifest' -or $manifest.operating_system -ne 'windows' -or $manifest.package.vendor -ne 'zabbix'){Fail 'Not a Windows Zabbix enrollment manifest.'}
+if(([DateTimeOffset]$manifest.expires_at) -le [DateTimeOffset]::UtcNow){Fail 'This enrollment manifest has expired.'}
+if(-not $manifest.package.source_url.StartsWith('https://') -or $manifest.package.sha256 -notmatch '^[A-Fa-f0-9]{64}$'){Fail 'Manifest package policy is invalid.'}
+$work=Join-Path $env:TEMP ('lsmon-zabbix-'+$manifest.enrollment_id);New-Item -ItemType Directory -Force -Path $work|Out-Null
+try {
+  $msi=Join-Path $work $manifest.package.filename;Write-Output 'LSMON downloading the approved Zabbix Agent 2 package.';Invoke-WebRequest -UseBasicParsing -Uri $manifest.package.source_url -OutFile $msi -TimeoutSec 300
+  if((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash -ne $manifest.package.sha256.ToUpperInvariant()){Fail 'Package checksum does not match the approved catalog record.'}
+  $signature=Get-AuthenticodeSignature -LiteralPath $msi;if($signature.Status -ne 'Valid'){Fail 'Package signature is not valid.'};if($manifest.package.expected_publisher -and $signature.SignerCertificate.Subject -notmatch [regex]::Escape($manifest.package.expected_publisher)){Fail 'Package publisher does not match the approved catalog record.'}
+  $rsa=[Security.Cryptography.RSA]::Create(3072);$p=$rsa.ExportParameters($false);$public=@{modulus=(B64Url $p.Modulus);exponent=(B64Url $p.Exponent)}|ConvertTo-Json -Compress
+  Write-Output 'LSMON package verified; registering this endpoint.';$registration=Invoke-RestMethod -Method Post -Uri $manifest.validation_url -Body @{enrollment_id=$manifest.enrollment_id;registration_code=$RegistrationCode.Trim().ToUpperInvariant();endpoint_public_key=(B64Url([Text.Encoding]::UTF8.GetBytes($public)));endpoint_key_algorithm='rsa-csp-public-v1'}
+  if(-not $registration.valid -or -not $registration.delivery_token){Fail 'Registration was rejected.'}
+  Write-Output "LSMON registration accepted for enrollment $($manifest.enrollment_id); waiting up to $DeliveryWaitSeconds seconds for encrypted configuration."
+  for($i=0;$i-lt[Math]::Ceiling($DeliveryWaitSeconds/2);$i++){Start-Sleep 2;try{$delivery=Invoke-RestMethod -Method Post -Uri $manifest.configuration_url -Body @{delivery_token=$registration.delivery_token}}catch{continue};if($delivery.available){break}}
+  if(-not $delivery.available){Fail 'Encrypted tenant configuration was not delivered before the timeout.'}
+  $e=$delivery.envelope;if($e.algorithm -ne 'rsa-oaep-sha256+a256cbc-hs256'){Fail 'Unsupported configuration envelope.'};$keys=$rsa.Decrypt((FromB64Url $e.encrypted_key),[Security.Cryptography.RSAEncryptionPadding]::OaepSHA256);$aesKey=$keys[0..31];$macKey=$keys[32..63];$iv=FromB64Url $e.iv;$cipher=FromB64Url $e.ciphertext;$aad=[Text.Encoding]::UTF8.GetBytes('lsmon-agent-delivery-v1:'+$manifest.enrollment_id);$h=New-Object Security.Cryptography.HMACSHA256(,[byte[]]$macKey);$actualTag=$h.ComputeHash($aad+$iv+$cipher);$expectedTag=FromB64Url $e.tag;if(-not(FixedTimeEquals -Left $actualTag -Right $expectedTag)){Fail 'Configuration authentication failed.'};$aes=[Security.Cryptography.Aes]::Create();$aes.Key=$aesKey;$aes.IV=$iv;$aes.Mode='CBC';$aes.Padding='PKCS7';$config=([Text.Encoding]::UTF8.GetString($aes.CreateDecryptor().TransformFinalBlock($cipher,0,$cipher.Length))|ConvertFrom-Json)
+  if(-not $config.server_active -or -not $config.hostname -or -not $config.tls_psk_identity -or $config.tls_psk -notmatch '^[A-Fa-f0-9]{64}$'){Fail 'Delivered Zabbix configuration is invalid.'}
+  Write-Output 'LSMON encrypted Zabbix configuration received; installing the agent.';$install=Start-Process msiexec.exe -ArgumentList @('/i',('"'+$msi+'"'),'/qn','/norestart','DONOTSTART=1','SERVER=127.0.0.1') -Wait -PassThru;if($install.ExitCode -ne 0){Fail "MSI installation failed with exit code $($install.ExitCode)."}
+  $root=Join-Path $env:ProgramFiles 'Zabbix Agent 2';$dir=Join-Path $root 'zabbix_agent2.d';New-Item -ItemType Directory -Force -Path $dir|Out-Null;$psk=Join-Path $root 'lsmon_agent2.psk';[IO.File]::WriteAllText($psk,$config.tls_psk+"`r`n",[Text.Encoding]::ASCII);$managed=Join-Path $dir '90-lsmon.conf';@("Server=127.0.0.1","ListenIP=127.0.0.1","ServerActive=$($config.server_active)","Hostname=$($config.hostname)",'TLSConnect=psk','TLSAccept=psk',"TLSPSKIdentity=$($config.tls_psk_identity)","TLSPSKFile=$psk",'DenyKey=system.run[*]','DenyKey=system.run[*,*]')|Set-Content -LiteralPath $managed -Encoding ascii
+  & icacls $psk /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)'|Out-Null;& icacls $managed /inheritance:r /grant:r 'SYSTEM:(F)' 'Administrators:(F)'|Out-Null
+  $service=Get-CimInstance Win32_Service|Where-Object {$_.PathName -match '(?i)zabbix_agent2\.exe'}|Select-Object -First 1;if(-not $service){Fail 'Zabbix Agent 2 service was not installed.'};Restart-Service -Name $service.Name -ErrorAction Stop;Write-Output 'LSMON Zabbix Agent 2 bootstrap completed.'
+} finally {if($rsa){$rsa.Dispose()};Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue}
