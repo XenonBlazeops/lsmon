@@ -30,7 +30,7 @@ Purpose: apply only lsmon_core migration 0041 on vmi3626301.
 
 Before execution:
 1. Verify the accompanying SHA-256 checksum.
-2. Upload and extract this folder at /home/ubuntu/lsmon-membership-role-migration-v1.
+2. Upload and extract this folder at /home/ubuntu/lsmon-membership-role-migration-v2.
 3. Run the activator as root.
 
 The activator creates a PostgreSQL custom-format rollback dump, installs only
@@ -48,7 +48,7 @@ Remove-Item -LiteralPath $archive,$checksum -Force -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) { throw 'tar archive creation failed.' }
 
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-Set-Content -LiteralPath $checksum -Value "$hash  lsmon-membership-role-migration-v1.tar.gz" -NoNewline
+Set-Content -LiteralPath $checksum -Value "$hash  $PackageName.tar.gz" -NoNewline
 
 Write-Output "Archive: $archive"
 Write-Output "Checksum: $checksum"
