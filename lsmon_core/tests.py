@@ -880,14 +880,18 @@ class TenantBoundaryTests(TestCase):
         other = AgentEnrollment.objects.create(tenant=self.tenant_b, requested_by=self.user, package=package, operating_system="linux")
         with patch("lsmon_core.zabbix_dashboard._call", side_effect=[
             [{"hostid": "101", "host": f"lsmon-a-{str(own.id)[:12]}", "name": "A host", "status": "0", "active_available": "1"}],
+            "1",
             [{"eventid": "1", "name": "Disk space low", "severity": "2", "clock": "1760520000", "acknowledged": "0"}],
         ]) as call:
             summary = summary_for_enrollments([own])
         self.assertEqual(summary["state"], "ready")
         self.assertEqual(len(summary["hosts"]), 1)
         self.assertEqual(summary["available_hosts"], 1)
+        self.assertEqual(summary["problem_count"], 1)
         self.assertEqual(summary["problems"][0]["name"], "Disk space low")
         self.assertEqual(call.call_args_list[0].args[1]["filter"]["host"], [f"lsmon-a-{str(own.id)[:12]}"])
+        self.assertEqual(call.call_args_list[1].args[1]["hostids"], ["101"])
+        self.assertEqual(call.call_args_list[2].args[1]["hostids"], ["101"])
         self.assertNotIn(str(other.id)[:12], str(call.call_args_list))
 
     def test_windows_bootstrap_writes_managed_glpi_registry_configuration(self):
