@@ -68,3 +68,12 @@ EMAIL_USE_SSL = os.environ.get("LSMON_SMTP_USE_SSL", "false").lower() == "true"
 EMAIL_TIMEOUT = 20
 DEFAULT_FROM_EMAIL = os.environ.get("LSMON_SMTP_FROM", "")
 SERVER_EMAIL = DEFAULT_FROM_EMAIL
+
+# keycloak-portal-oidc-signin-v1
+LSMON_OIDC_ENABLED = os.environ.get("LSMON_OIDC_ENABLED", "false").lower() == "true"
+LSMON_OIDC_ISSUER = os.environ.get("LSMON_OIDC_ISSUER", "")
+LSMON_OIDC_CLIENT_ID = os.environ.get("LSMON_OIDC_CLIENT_ID", "")
+_oidc_secret_b64 = os.environ.get("LSMON_OIDC_CLIENT_SECRET_B64", "")
+LSMON_OIDC_CLIENT_SECRET = base64.b64decode(_oidc_secret_b64).decode() if _oidc_secret_b64 else ""
+LSMON_OIDC_REDIRECT_URI = os.environ.get("LSMON_OIDC_REDIRECT_URI", "")
+LSMON_OIDC_USER_AGENT = os.environ.get("LSMON_OIDC_USER_AGENT", "TecstaqOps-Portal-OIDC/1.0")

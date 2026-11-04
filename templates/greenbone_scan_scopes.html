@@ -1,0 +1,7 @@
+{% extends 'base.html' %}
+{% block title %}Greenbone scan scope · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} security</p><h1>Greenbone scan scope</h1><p class="sub">Record one approved target and maintenance window before any Greenbone target or scan can be created. This page cannot contact a host or start a scan. Recorded requests remain pending until a Global Administrator reviews them.</p></div><a class="button secondary" href="{% url 'security_findings' tenant.slug %}">Back to findings</a></header>
+<section class="panel"><h2>Request authorized scope</h2><form method="post">{% csrf_token %}{{ form.as_p }}<button type="submit">Record scan-scope request</button></form></section>
+<section class="panel"><div class="panel-head"><h2>Recorded requests</h2><span>{{ scopes|length }} record{{ scopes|length|pluralize }}</span></div><table><thead><tr><th>Target reference</th><th>Authorization</th><th>Maintenance window</th><th>Status</th><th>Requested</th></tr></thead><tbody>{% for scope in scopes %}<tr><td>{{ scope.target_reference }}</td><td>{{ scope.authorization_reference }}</td><td>{{ scope.maintenance_window_start|date:"Y-m-d H:i T" }} → {{ scope.maintenance_window_end|date:"Y-m-d H:i T" }}</td><td>{{ scope.get_status_display }}</td><td>{{ scope.created_at|date:"Y-m-d H:i T" }}</td></tr>{% empty %}<tr><td colspan="5">No Greenbone target scope is recorded. No target or scan exists.</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

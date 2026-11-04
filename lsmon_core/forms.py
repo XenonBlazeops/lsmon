@@ -298,3 +298,76 @@ class FindingExceptionForm(forms.ModelForm):
             "compensating_control": forms.Textarea(attrs={"rows": 3}),
             "expires_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
         }
+
+
+from .models import CloudPostureConnector
+
+
+class CloudPostureConnectorForm(forms.ModelForm):
+    credential_reference = forms.CharField(
+        label="Server-side credential reference",
+        max_length=128,
+        validators=[RegexValidator(r"^[A-Z][A-Z0-9_]{2,127}$", "Use an uppercase reference name, never a credential value.")],
+        help_text="Reference only. Keys, passwords, tokens, and service-account JSON are never accepted in the portal.",
+    )
+
+    class Meta:
+        model = CloudPostureConnector
+        fields = ("provider", "account_scope", "credential_reference", "status")
+        labels = {
+            "account_scope": "Approved account, subscription, project, or third-party workspace",
+            "status": "Read-only connection state",
+        }
+        help_texts = {"account_scope": "One approved scope for this tenant. Saving this connector does not contact the provider."}
+
+# cloud-connector-status-lock-v1
+
+# This deliberate final definition replaces the foundation form.  A tenant can
+# register scope and a non-secret reference, but cannot self-attest that a
+# server-side credential is present or that a connection was verified.
+class CloudPostureConnectorForm(forms.ModelForm):
+    credential_reference = forms.CharField(
+        label="Server-side credential reference",
+        max_length=128,
+        validators=[RegexValidator(r"^[A-Z][A-Z0-9_]{2,127}$", "Use an uppercase reference name, never a credential value.")],
+        help_text="Reference only. Keys, passwords, tokens, certificates, and service-account JSON are never accepted here.",
+    )
+
+    class Meta:
+        model = CloudPostureConnector
+        fields = ("provider", "account_scope", "credential_reference")
+        labels = {"account_scope": "Approved account, subscription, project, or third-party workspace"}
+        help_texts = {"account_scope": "The connector remains Draft until a provider-managed server-side test verifies the approved read-only scope."}
+
+from django import forms
+from django.core.validators import RegexValidator
+from .models import GreenboneScanScope
+
+
+class GreenboneScanScopeForm(forms.ModelForm):
+    target_reference = forms.CharField(
+        max_length=255,
+        validators=[RegexValidator(r"^[A-Za-z0-9._:/-]+$", "Use one hostname, IP address, or CIDR reference; no spaces or commands.")],
+        help_text="Scope reference only. Saving this request cannot contact or scan a target.",
+    )
+
+    class Meta:
+        model = GreenboneScanScope
+        fields = ("target_reference", "authorization_reference", "maintenance_window_start", "maintenance_window_end")
+        widgets = {
+            "maintenance_window_start": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "maintenance_window_end": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        }
+        help_texts = {
+            "authorization_reference": "Customer authorization or approved change reference; never include a credential.",
+        }
+
+
+class WazuhEndpointCorrelationForm(forms.Form):
+    hostname = forms.CharField(max_length=255, widget=forms.HiddenInput)
+    asset = forms.ModelChoiceField(queryset=Asset.objects.none(), label="Verified portal asset")
+
+    def __init__(self, *args, tenant=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["asset"].queryset = Asset.objects.filter(tenant=tenant).order_by("name")
+        self.fields["asset"].help_text = "Choose the asset that the Wazuh hostname is known to represent. This does not change Wazuh or GLPI."

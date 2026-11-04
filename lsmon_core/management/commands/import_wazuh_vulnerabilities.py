@@ -9,11 +9,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--tenant-slug", required=True)
-        parser.add_argument("--limit", type=int, default=250)
+        parser.add_argument("--limit", type=int, default=750)
 
     def handle(self, *args, **options):
-        if not 1 <= options["limit"] <= 250:
-            raise CommandError("--limit must be between 1 and 250")
+        if not 1 <= options["limit"] <= 750:
+            raise CommandError("--limit must be between 1 and 750")
         connector = SecurityConnector.objects.filter(tenant__slug=options["tenant_slug"], provider=SecurityConnector.Provider.WAZUH).select_related("tenant").first()
         if connector is None:
             raise CommandError("Tenant Wazuh connector is not configured")

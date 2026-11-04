@@ -64,6 +64,7 @@ class Membership(models.Model):
         TENANT_ADMIN = "tenant_admin"
         NOC_SOC = "noc_soc"
         VIEWER = "viewer"
+        PLATFORM_OPERATIONS = "platform_operations"
     # A Global Admin membership is platform-wide and therefore has no tenant.
     # Every other role must be tied to precisely one tenant.
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, null=True, blank=True)
@@ -72,9 +73,11 @@ class Membership(models.Model):
 
     def clean(self):
         from django.core.exceptions import ValidationError
-        if self.role == self.Role.GLOBAL_ADMIN and self.tenant_id is not None:
-            raise ValidationError("Global Admin memberships cannot be tenant-scoped.")
-        if self.role != self.Role.GLOBAL_ADMIN and self.tenant_id is None:
+        # platform-admin-rbac-v1
+        platform_roles = (self.Role.GLOBAL_ADMIN, self.Role.PLATFORM_OPERATIONS)
+        if self.role in platform_roles and self.tenant_id is not None:
+            raise ValidationError("Platform-wide roles cannot be tenant-scoped.")
+        if self.role not in platform_roles and self.tenant_id is None:
             raise ValidationError("Tenant roles require a tenant.")
 
     class Meta:
@@ -334,6 +337,8 @@ class SecurityFinding(models.Model):
     owner = models.CharField(max_length=160, blank=True)
     remediation_url = models.URLField(max_length=500, blank=True)
     evidence_reference = models.CharField(max_length=500, blank=True)
+    observed_hostname = models.CharField(max_length=255, blank=True)
+    observed_ip = models.GenericIPAddressField(null=True, blank=True)
     first_observed_at = models.DateTimeField()
     last_observed_at = models.DateTimeField()
     due_at = models.DateTimeField(null=True, blank=True)
@@ -640,3 +645,126 @@ class AgentProvisioningJob(models.Model):
 
     class Meta:
         ordering = ("created_at",)
+
+
+class CloudPostureConnector(models.Model):
+    """Tenant-scoped, read-only cloud posture configuration; secrets stay outside Django."""
+    class Provider(models.TextChoices):
+        AWS = "aws", "AWS"
+        AZURE = "azure", "Microsoft Azure"
+        GCP = "gcp", "Google Cloud"
+        THIRD_PARTY = "third_party", "Third-party cloud"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft / secret not provisioned"
+        READY = "ready", "Read-only scope approved"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="cloud_posture_connectors")
+    provider = models.CharField(max_length=16, choices=Provider.choices)
+    account_scope = models.CharField(max_length=160)
+    credential_reference = models.CharField(max_length=128)
+    read_only = models.BooleanField(default=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    configured_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("tenant", "provider", "account_scope"), name="unique_tenant_cloud_posture_scope")]
+        ordering = ("provider", "account_scope")
+
+
+class CloudPostureAssessmentRun(models.Model):
+    """Safe audit record for a tenant cloud-posture assessment; never stores cloud responses or secrets."""
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    connector = models.ForeignKey(CloudPostureConnector, on_delete=models.CASCADE, related_name="assessment_runs")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.QUEUED)
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    finding_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+
+
+class GreenboneScanScope(models.Model):
+    """An approved-scope request; it never creates or executes a scanner job."""
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        APPROVED = "approved", "Approved"
+        CANCELLED = "cancelled", "Cancelled"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="greenbone_scan_scopes")
+    target_reference = models.CharField(max_length=255)
+    authorization_reference = models.CharField(max_length=160)
+    maintenance_window_start = models.DateTimeField()
+    maintenance_window_end = models.DateTimeField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.REQUESTED)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="greenbone_scan_scope_requests")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="greenbone_scan_scope_reviews", null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.maintenance_window_end <= self.maintenance_window_start:
+            raise ValidationError("Maintenance-window end must be after its start.")
+
+class GreenboneAssessmentRun(models.Model):
+    """Audit metadata for an offline, operator-supplied Greenbone report."""
+    class Status(models.TextChoices):
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="greenbone_assessment_runs")
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RUNNING)
+    source_label = models.CharField(max_length=32, default="operator_report")
+    started_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    finding_count = models.PositiveIntegerField(default=0)
+    created_count = models.PositiveIntegerField(default=0)
+    updated_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        ordering = ("-started_at",)
+
+
+class WazuhEndpointAssetLink(models.Model):
+    """Provider-verified correlation between one tenant Wazuh hostname and one portal asset."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="wazuh_endpoint_links")
+    hostname = models.CharField(max_length=255)
+    asset = models.ForeignKey(Asset, on_delete=models.PROTECT, related_name="wazuh_endpoint_links")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="wazuh_endpoint_links_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("tenant", "hostname"), name="unique_tenant_wazuh_endpoint_link")]
+        ordering = ("hostname",)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.asset_id and self.asset.tenant_id != self.tenant_id:
+            raise ValidationError("A Wazuh endpoint can be linked only to an asset in the same tenant.")
+
+
+class OIDCIdentity(models.Model):
+    """Stable, verified Keycloak subject linked to one pre-provisioned Portal user."""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="oidc_identity")
+    issuer = models.CharField(max_length=500)
+    subject = models.CharField(max_length=255)
+    linked_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=("issuer", "subject"), name="unique_oidc_issuer_subject")]

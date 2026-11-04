@@ -3,6 +3,8 @@ from django.urls import path
 from lsmon_core import views
 
 urlpatterns = [
+    path("auth/oidc/start/", views.oidc_start, name="oidc_start"),
+    path("auth/oidc/callback/", views.oidc_callback, name="oidc_callback"),
     path("sign-in/", views.PortalLoginView.as_view(), name="login"),
     path("mfa/enroll/", views.mfa_enroll, name="mfa_enroll"),
     path("mfa/challenge/", views.mfa_challenge, name="mfa_challenge"),
@@ -17,6 +19,11 @@ urlpatterns = [
     path("tenants/create/", views.create_tenant, name="tenant_create"),
     path("t/<slug:slug>/", views.tenant_home, name="tenant_home"),
     path("t/<slug:slug>/security/findings/", views.security_findings, name="security_findings"),
+    path("t/<slug:slug>/security/wazuh-endpoint-correlation/", views.wazuh_endpoint_correlation, name="wazuh_endpoint_correlation"),
+    path("t/<slug:slug>/security/greenbone-scopes/", views.greenbone_scan_scopes, name="greenbone_scan_scopes"),
+    path("t/<slug:slug>/security/greenbone-assessments/", views.greenbone_assessment_history, name="greenbone_assessment_history"),
+    path("operations/greenbone-scan-scopes/", views.greenbone_scan_scope_queue, name="greenbone_scan_scope_queue"),
+    path("operations/greenbone-scan-scopes/<int:scope_id>/<str:action>/", views.greenbone_scan_scope_action, name="greenbone_scan_scope_action"),
     path("t/<slug:slug>/security/findings/add/", views.security_finding_create, name="security_finding_create"),
     path("t/<slug:slug>/security/findings/<uuid:finding_id>/", views.security_finding_detail, name="security_finding_detail"),
     path("t/<slug:slug>/assets/", views.asset_list, name="asset_list"),
@@ -34,6 +41,9 @@ urlpatterns = [
     path("t/<slug:slug>/assets/structure/", views.asset_structure, name="asset_structure"),
     path("t/<slug:slug>/integrations/glpi/", views.glpi_connector, name="glpi_connector"),
     path("t/<slug:slug>/integrations/wazuh/", views.security_connector, name="security_connector"),
+    path("t/<slug:slug>/integrations/cloud-connectors/", views.cloud_posture_connector, name="cloud_posture_connector"),
+    path("t/<slug:slug>/security/cloud-posture/", views.cloud_posture_dashboard, name="cloud_posture_dashboard"),
+    path("t/<slug:slug>/security/cloud-posture/export.csv", views.cloud_posture_export, name="cloud_posture_export"),
     path("t/<slug:slug>/agent-enrollments/", views.agent_enrollments, name="agent_enrollments"),
     path("t/<slug:slug>/agent-enrollments/<uuid:enrollment_id>/bootstrap/", views.download_enrollment_bootstrap, name="download_enrollment_bootstrap"),
     path("t/<slug:slug>/agent-enrollments/<uuid:enrollment_id>/windows-bootstrap/", views.download_windows_bootstrap, name="download_windows_bootstrap"),

@@ -1,12 +1,14 @@
 from functools import wraps
 import base64
+import os
 import csv
 import hmac
 import json
 from pathlib import Path
 from datetime import timedelta, timezone as datetime_timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
@@ -19,11 +21,12 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
+from . import oidc
 from .authorization import AuthorizationDenied, can_view_operations, is_global_admin, require_tenant_role, visible_tenants
-from .forms import AgentEnrollmentForm, AgentPackageForm, AssetCreateForm, AssetPlacementForm, DepartmentForm, FindingExceptionForm, FindingRemediationForm, GlpiConnectorForm, InvitationAcceptForm, SecurityConnectorForm, SecurityFindingForm, SoftwareComplianceRuleForm, TenantAgentProvisioningForm, TenantLocationForm, TOTPCodeForm, TenantCreateForm
+from .forms import WazuhEndpointCorrelationForm, AgentEnrollmentForm, AgentPackageForm, AssetCreateForm, AssetPlacementForm, DepartmentForm, FindingExceptionForm, FindingRemediationForm, GlpiConnectorForm, InvitationAcceptForm, SecurityConnectorForm, SecurityFindingForm, SoftwareComplianceRuleForm, TenantAgentProvisioningForm, TenantLocationForm, TOTPCodeForm, TenantCreateForm
 from .invitations import invitation_token_hash
 from .mfa import decrypt_secret, encrypt_secret, generate_secret, provisioning_uri, verify_code
-from .models import AgentEnrollment, AgentEnrollmentEvent, AgentPackage, AgentProvisioningJob, AgentRegistrationValidation, Asset, AssetCompliance, AssetExternalIdentity, AssetNetworkInterface, AssetSoftware, ComplianceAuditEvent, Department, FindingAuditEvent, FindingException, FindingRemediation, InventoryConnector, InventorySyncRun, MFAProfile, Membership, SecurityConnector, SecurityFinding, SoftwareComplianceRule, Tenant, TenantAdminInvitation, TenantAgentProvisioning, TenantLocation, VulnerabilityImportRun, unique_tenant_slug
+from .models import WazuhEndpointAssetLink, AgentEnrollment, AgentEnrollmentEvent, AgentPackage, AgentProvisioningJob, AgentRegistrationValidation, Asset, AssetCompliance, AssetExternalIdentity, AssetNetworkInterface, AssetSoftware, ComplianceAuditEvent, Department, FindingAuditEvent, FindingException, FindingRemediation, InventoryConnector, InventorySyncRun, MFAProfile, Membership, SecurityConnector, SecurityFinding, SoftwareComplianceRule, Tenant, TenantAdminInvitation, TenantAgentProvisioning, TenantLocation, VulnerabilityImportRun, unique_tenant_slug
 from .compliance import evaluate_tenant
 from .registration import generate_registration_code, hash_registration_code, registration_code_matches
 from .envelope import decode_public_key, generate_delivery_token, hash_delivery_token, public_key_fingerprint
@@ -44,6 +47,19 @@ from .wazuh_scan_state import (
 
 
 GLPI_INVENTORY_FRESHNESS_HOURS = 26
+
+
+def _safe_console_url(value):
+    """Return only an HTTPS console URL; never expose API-only loopback URLs."""
+    if not value:
+        return None
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None
+    return value.rstrip("/")
 
 
 def _inventory_freshness(last_seen_at):
@@ -90,11 +106,30 @@ def mfa_required(view):
 class PortalLoginView(LoginView):
     template_name = "login.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        if settings.LSMON_OIDC_ENABLED:
+            next_url = request.GET.get("next", "")
+            suffix = f"?next={quote(next_url)}" if next_url else ""
+            return redirect(reverse("oidc_start") + suffix)
+        return super().dispatch(request, *args, **kwargs)
+
     def form_valid(self, form):
         response = super().form_valid(form)
         self.request.session.pop("mfa_verified_user_id", None)
         self.request.session["mfa_password_user_id"] = str(self.request.user.pk)
         return response
+
+
+def oidc_start(request):
+    return oidc.start(request)
+
+
+def oidc_callback(request):
+    try:
+        return oidc.callback(request)
+    except oidc.OIDCAuthenticationError as error:
+        messages.error(request, str(error))
+        return redirect("login")
 
 
 @login_required
@@ -156,6 +191,10 @@ def dashboard(request):
     zabbix_summary = summary_for_enrollments(zabbix_enrollments)
     inventory_summary = _provider_inventory_summary(tenants)
     security_findings = provider_summary_for_connectors(security_connectors)
+    # provider-cloud-summary-v1
+    from .models import CloudPostureConnector
+    cloud_connectors = CloudPostureConnector.objects.filter(tenant__in=tenants)
+    cloud_ready = cloud_connectors.filter(status=CloudPostureConnector.Status.READY).count()
     operational_attention = {
         "zabbix_problems": zabbix_summary.get("problem_count", len(zabbix_summary["problems"])) if zabbix_summary.get("state") == "ready" else 0,
         "wazuh_critical": security_findings["critical"],
@@ -166,6 +205,8 @@ def dashboard(request):
     }
     return render(request, "dashboard.html", {
         "tenant_count": tenants.count(),
+        "cloud_connector_count": cloud_connectors.count(),
+        "cloud_ready_count": cloud_ready,
         "tenants": tenants[:5],
         "zabbix_summary": zabbix_summary,
         "security_summary": provider_wazuh_summary_for_connectors(security_connectors),
@@ -792,12 +833,19 @@ def tenant_home(request, slug):
     ).first()
     security_findings = wazuh_findings_for_connector(security_connector)
     security_freshness = wazuh_scan_state_for_connector(security_connector)
+    # tenant-home-cloud-summary-v1
+    from .models import CloudPostureConnector
+    cloud_connectors = CloudPostureConnector.objects.filter(tenant=tenant)
+    cloud_ready = cloud_connectors.filter(status=CloudPostureConnector.Status.READY).count()
     return render(request, "tenant_home.html", {
         "tenant": tenant,
         "asset_count": asset_count,
         "compliance_summary": compliance_summary,
         "inventory_summary": inventory_summary,
         "glpi_connector": InventoryConnector.objects.filter(tenant=tenant, provider=InventoryConnector.Provider.GLPI).first(),
+        "glpi_console_url": _safe_console_url(InventoryConnector.objects.filter(tenant=tenant, provider=InventoryConnector.Provider.GLPI).values_list("base_url", flat=True).first()),
+        "zabbix_console_url": _safe_console_url(os.environ.get("ZABBIX_DASHBOARD_WEB_URL")),
+        "wazuh_console_url": _safe_console_url(os.environ.get("WAZUH_DASHBOARD_WEB_URL")),
         "glpi_sync_run": InventorySyncRun.objects.filter(connector__tenant=tenant, connector__provider=InventoryConnector.Provider.GLPI).first(),
         "agent_provisioning": TenantAgentProvisioning.objects.filter(tenant=tenant).first(),
         "zabbix_summary": summary_for_enrollments(zabbix_enrollments),
@@ -806,6 +854,8 @@ def tenant_home(request, slug):
         "security_attention": attention_for_summary(security_findings),
         "security_freshness": security_freshness,
         "security_connector": security_connector,
+        "cloud_connector_count": cloud_connectors.count(),
+        "cloud_ready_count": cloud_ready,
         "is_provider": is_global_admin(request.user),
     })
 
@@ -836,44 +886,60 @@ def allowed_finding_status_values(finding):
 
 @mfa_required
 def security_findings(request, slug):
-    """List only normalized records that belong to the selected tenant."""
+    """Tenant-scoped finding, severity, and reported-endpoint drill-down view."""
     tenant = tenant_for_request(request, slug, [Membership.Role.TENANT_ADMIN, Membership.Role.VIEWER, Membership.Role.NOC_SOC])
-    findings = SecurityFinding.objects.filter(tenant=tenant).select_related("asset").order_by(
-        "severity", "due_at", "-last_observed_at"
-    )
-    latest_import = VulnerabilityImportRun.objects.filter(tenant=tenant).first()
-    now = timezone.now()
     all_findings = SecurityFinding.objects.filter(tenant=tenant)
     open_findings = all_findings.exclude(status=SecurityFinding.Status.VERIFIED_CLOSED)
+    selected_severity = request.GET.get("severity", "").lower()
+    filters = {
+        "critical": (SecurityFinding.Severity.CRITICAL,), "high": (SecurityFinding.Severity.HIGH,),
+        "medium": (SecurityFinding.Severity.MEDIUM,), "low": (SecurityFinding.Severity.LOW, SecurityFinding.Severity.INFORMATIONAL),
+    }
+    if selected_severity not in filters:
+        selected_severity = ""
+    selected_endpoint = request.GET.get("endpoint", "").strip()[:255]
+    reported_only = request.GET.get("reported") == "1"
+    findings = open_findings.select_related("asset")
+    if selected_severity:
+        findings = findings.filter(severity__in=filters[selected_severity])
+    if selected_endpoint:
+        findings = findings.filter(observed_hostname=selected_endpoint)
+    elif reported_only:
+        findings = findings.exclude(observed_hostname="")
+    findings = findings.order_by("severity", "due_at", "-last_observed_at")
+    latest_import = VulnerabilityImportRun.objects.filter(tenant=tenant).first()
+    now = timezone.now()
     open_critical = open_findings.filter(severity=SecurityFinding.Severity.CRITICAL)
-    overdue_critical = open_critical.filter(due_at__lt=now)
-    import_current = bool(
-        latest_import
-        and latest_import.status == VulnerabilityImportRun.Status.SUCCEEDED
-        and latest_import.completed_at
-        and latest_import.completed_at >= now - timedelta(hours=26)
-    )
+    severity_counts = {
+        "critical": open_findings.filter(severity=SecurityFinding.Severity.CRITICAL).count(),
+        "high": open_findings.filter(severity=SecurityFinding.Severity.HIGH).count(),
+        "medium": open_findings.filter(severity=SecurityFinding.Severity.MEDIUM).count(),
+        "low": open_findings.filter(severity__in=filters["low"]).count(),
+    }
+    top_endpoints = {
+        name: list(open_findings.filter(severity__in=levels).exclude(observed_hostname="").values("observed_hostname").annotate(finding_count=Count("id")).order_by("-finding_count", "observed_hostname")[:5])
+        for name, levels in filters.items()
+    }
+    total_by_severity = sum(severity_counts.values())
+    percent = lambda name: round(100 * severity_counts[name] / total_by_severity, 2) if total_by_severity else 0
+    critical_end = percent("critical")
+    high_end = critical_end + percent("high")
+    medium_end = high_end + percent("medium")
+    import_current = bool(latest_import and latest_import.status == VulnerabilityImportRun.Status.SUCCEEDED and latest_import.completed_at and latest_import.completed_at >= now - timedelta(hours=26))
+    reported_endpoint_count = open_findings.exclude(observed_hostname="").values("observed_hostname").distinct().count()
+    asset_count = Asset.objects.filter(tenant=tenant).count()
+    matched_asset_count = open_findings.filter(asset__isnull=False).values("asset_id").distinct().count()
+    unmatched_endpoint_count = open_findings.filter(asset__isnull=True).exclude(observed_hostname="").values("observed_hostname").distinct().count()
+    coverage_percent = round(100 * min(reported_endpoint_count, asset_count) / asset_count) if asset_count else 0
     return render(request, "security_findings.html", {
-        "tenant": tenant,
-        "findings": findings,
-        "can_manage_findings": is_global_admin(request.user),
-        "is_provider": is_global_admin(request.user),
+        "tenant": tenant, "findings": findings, "selected_severity": selected_severity,
+        "selected_endpoint": selected_endpoint, "reported_only": reported_only,
+        "can_manage_findings": is_global_admin(request.user), "is_provider": is_global_admin(request.user),
         "latest_vulnerability_import": latest_import,
-        "latest_vulnerability_import_completed_utc": (
-            timezone.localtime(latest_import.completed_at, datetime_timezone.utc)
-            if latest_import and latest_import.completed_at else None
-        ),
-        "security_measurement": {
-            "import_current": import_current,
-            "open_findings": open_findings.count(),
-            "critical_open": open_critical.count(),
-            "critical_overdue": overdue_critical.count(),
-            "critical_without_due": open_critical.filter(due_at__isnull=True).count(),
-            "verified_closed": all_findings.filter(status=SecurityFinding.Status.VERIFIED_CLOSED).count(),
-            "normalized_total": all_findings.count(),
-        },
+        "latest_vulnerability_import_completed_utc": timezone.localtime(latest_import.completed_at, datetime_timezone.utc) if latest_import and latest_import.completed_at else None,
+        "security_measurement": {"import_current": import_current, "open_findings": open_findings.count(), "critical_open": open_critical.count(), "critical_overdue": open_critical.filter(due_at__lt=now).count(), "critical_without_due": open_critical.filter(due_at__isnull=True).count(), "verified_closed": all_findings.filter(status=SecurityFinding.Status.VERIFIED_CLOSED).count(), "normalized_total": all_findings.count()},
+        "security_dashboard": {**severity_counts, "top_endpoints": top_endpoints, "total_by_severity": total_by_severity, "open_findings": open_findings.count(), "import_current": import_current, "reported_endpoint_count": reported_endpoint_count, "asset_count": asset_count, "matched_asset_count": matched_asset_count, "unmatched_endpoint_count": unmatched_endpoint_count, "coverage_percent": coverage_percent, "critical_end": critical_end, "high_end": high_end, "medium_end": medium_end, "low_end": 100 if total_by_severity else 0, "critical_percent": percent("critical"), "high_percent": percent("high"), "medium_percent": percent("medium"), "low_percent": percent("low")},
     })
-
 
 @mfa_required
 def security_finding_create(request, slug):
@@ -1424,3 +1490,216 @@ def accept_invitation(request, token):
             request.session["mfa_password_user_id"] = str(user.pk)
             return redirect("mfa_enroll")
     return render(request, "invitation_accept.html", {"form": form, "tenant": invitation.tenant})
+
+
+@mfa_required
+def cloud_posture_connector(request, slug):
+    """Configure non-secret cloud posture references only; no provider call occurs here."""
+    from .forms import CloudPostureConnectorForm
+    from .models import CloudPostureConnector
+    tenant = tenant_for_request(request, slug, [Membership.Role.TENANT_ADMIN])
+    can_manage = is_global_admin(request.user) or Membership.objects.filter(
+        tenant=tenant, user=request.user, role=Membership.Role.TENANT_ADMIN,
+    ).exists()
+    if not can_manage:
+        raise PermissionDenied("Tenant Administrator access is required.")
+    form = CloudPostureConnectorForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        connector = form.save(commit=False)
+        connector.tenant = tenant
+        connector.read_only = True
+        try:
+            connector.save()
+        except IntegrityError:
+            form.add_error("account_scope", "This provider and scope already exist for this tenant.")
+        else:
+            messages.success(request, "Read-only cloud connector saved. No cloud login, scan, assessment, or remediation was run.")
+            return redirect("cloud_posture_connector", slug=tenant.slug)
+    return render(request, "cloud_posture_connector.html", {
+        "tenant": tenant,
+        "form": form,
+        "connectors": CloudPostureConnector.objects.filter(tenant=tenant),
+        "is_provider": is_global_admin(request.user),
+    })
+
+
+@mfa_required
+def cloud_posture_dashboard(request, slug):
+    """Tenant-safe cloud posture summary from portal-owned normalized records only."""
+    from .models import CloudPostureAssessmentRun, CloudPostureConnector
+    tenant = tenant_for_request(request, slug, [Membership.Role.TENANT_ADMIN, Membership.Role.NOC_SOC, Membership.Role.VIEWER])
+    connectors = CloudPostureConnector.objects.filter(tenant=tenant)
+    findings = SecurityFinding.objects.filter(tenant=tenant, source=SecurityFinding.Source.PROWLER)
+    open_findings = findings.exclude(status__in=[SecurityFinding.Status.VERIFIED_CLOSED, SecurityFinding.Status.ACCEPTED_EXCEPTION])
+    severity_counts = {row["severity"]: row["total"] for row in open_findings.values("severity").annotate(total=Count("id"))}
+    return render(request, "cloud_posture_dashboard.html", {
+        "tenant": tenant,
+        "is_provider": is_global_admin(request.user),
+        "connectors": connectors,
+        "recent_runs": CloudPostureAssessmentRun.objects.filter(connector__tenant=tenant).select_related("connector")[:10],
+        "open_total": open_findings.count(),
+        "critical_total": severity_counts.get(SecurityFinding.Severity.CRITICAL, 0),
+        "high_total": severity_counts.get(SecurityFinding.Severity.HIGH, 0),
+        "latest_finding_at": findings.order_by("-last_observed_at").values_list("last_observed_at", flat=True).first(),
+    })
+
+
+@mfa_required
+def cloud_posture_export(request, slug):
+    """Download a safe tenant-owned cloud posture CSV; excludes secrets and raw provider payloads."""
+    from .models import CloudPostureAssessmentRun, CloudPostureConnector
+    tenant = tenant_for_request(request, slug, [Membership.Role.TENANT_ADMIN, Membership.Role.NOC_SOC, Membership.Role.VIEWER])
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{tenant.slug}-cloud-posture.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["record_type", "provider", "scope", "severity", "control", "finding_status", "assessment_status", "observed_or_started_at"])
+    for connector in CloudPostureConnector.objects.filter(tenant=tenant):
+        writer.writerow(["connector", connector.provider, connector.account_scope, "", "", connector.get_status_display(), "", connector.configured_at.isoformat()])
+    for finding in SecurityFinding.objects.filter(tenant=tenant, source=SecurityFinding.Source.PROWLER):
+        writer.writerow(["finding", "", "", finding.severity, finding.control_id, finding.status, "", finding.last_observed_at.isoformat()])
+    for run in CloudPostureAssessmentRun.objects.filter(connector__tenant=tenant).select_related("connector"):
+        writer.writerow(["assessment_run", run.connector.provider, run.connector.account_scope, "", "", "", run.status, run.started_at.isoformat()])
+    return response
+
+from django.contrib import messages
+from django.shortcuts import redirect, render
+from .forms import GreenboneScanScopeForm
+from .models import GreenboneScanScope, Membership
+
+
+@mfa_required
+def greenbone_scan_scopes(request, slug):
+    tenant = tenant_for_request(request, slug, [Membership.Role.TENANT_ADMIN])
+    form = GreenboneScanScopeForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        scope = form.save(commit=False)
+        scope.tenant = tenant
+        scope.requested_by = request.user
+        scope.save()
+        messages.success(request, "Greenbone scan-scope request recorded. It does not create a Greenbone target or start a scan.")
+        return redirect("greenbone_scan_scopes", slug=tenant.slug)
+    return render(request, "greenbone_scan_scopes.html", {
+        "tenant": tenant,
+        "form": form,
+        "scopes": GreenboneScanScope.objects.filter(tenant=tenant),
+        "is_provider": is_global_admin(request.user),
+    })
+
+import ipaddress
+
+from django.core.exceptions import PermissionDenied
+from django.utils import timezone
+
+
+_DOCUMENTATION_NETWORKS = tuple(
+    ipaddress.ip_network(value)
+    for value in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")
+)
+
+
+def _greenbone_scope_review_blocker(scope):
+    if scope.maintenance_window_end <= timezone.now():
+        return "The recorded maintenance window has already ended. Record a new approved window before review."
+    try:
+        candidate = ipaddress.ip_network(scope.target_reference.strip(), strict=False)
+    except ValueError:
+        return None
+    if any(candidate.subnet_of(network) for network in _DOCUMENTATION_NETWORKS):
+        return "Documentation-only IP ranges cannot be approved as Greenbone scan targets."
+    return None
+
+
+@mfa_required
+def greenbone_scan_scope_queue(request):
+    if not is_global_admin(request.user):
+        raise PermissionDenied("Global Administrator access is required.")
+    return render(request, "greenbone_scan_scope_queue.html", {
+        "scopes": GreenboneScanScope.objects.select_related("tenant", "requested_by", "reviewed_by").all(),
+        "is_provider": True,
+    })
+
+
+@mfa_required
+def greenbone_scan_scope_action(request, scope_id, action):
+    if request.method != "POST":
+        raise PermissionDenied("Scan-scope review actions require a POST request.")
+    if not is_global_admin(request.user):
+        raise PermissionDenied("Global Administrator access is required.")
+    scope = get_object_or_404(GreenboneScanScope, pk=scope_id)
+    if scope.status != GreenboneScanScope.Status.REQUESTED:
+        messages.info(request, "This Greenbone scan-scope request has already been reviewed.")
+    elif action == "approve":
+        blocker = _greenbone_scope_review_blocker(scope)
+        if blocker:
+            messages.error(request, blocker)
+            return redirect("greenbone_scan_scope_queue")
+        scope.status = GreenboneScanScope.Status.APPROVED
+        scope.reviewed_by = request.user
+        scope.reviewed_at = timezone.now()
+        scope.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+        messages.success(request, "Greenbone scan scope approved. Approval alone does not create a target or start a scan.")
+    elif action == "cancel":
+        scope.status = GreenboneScanScope.Status.CANCELLED
+        scope.reviewed_by = request.user
+        scope.reviewed_at = timezone.now()
+        scope.save(update_fields=["status", "reviewed_by", "reviewed_at", "updated_at"])
+        messages.success(request, "Greenbone scan-scope request cancelled. No Greenbone target or scan was created.")
+    else:
+        raise PermissionDenied("Unsupported scan-scope review action.")
+    return redirect("greenbone_scan_scope_queue")
+
+
+from .models import GreenboneAssessmentRun
+
+
+@mfa_required
+def greenbone_assessment_history(request, slug):
+    tenant = tenant_for_request(request, slug, [Membership.Role.TENANT_ADMIN, Membership.Role.NOC_SOC, Membership.Role.VIEWER])
+    return render(request, "greenbone_assessment_history.html", {
+        "tenant": tenant,
+        "runs": GreenboneAssessmentRun.objects.filter(tenant=tenant)[:20],
+        "is_provider": is_global_admin(request.user),
+    })
+
+
+@mfa_required
+def wazuh_endpoint_correlation(request, slug):
+    if not is_global_admin(request.user):
+        raise PermissionDenied("Global Administrator access is required.")
+    tenant = get_object_or_404(Tenant, slug=slug, active=True)
+    unmatched = list(
+        SecurityFinding.objects.filter(
+            tenant=tenant, source=SecurityFinding.Source.WAZUH, asset__isnull=True,
+        ).exclude(observed_hostname="").values_list("observed_hostname", flat=True).distinct().order_by("observed_hostname")
+    )
+    if request.method == "POST":
+        form = WazuhEndpointCorrelationForm(request.POST, tenant=tenant)
+        if form.is_valid():
+            hostname = form.cleaned_data["hostname"]
+            if hostname not in unmatched:
+                raise PermissionDenied("This Wazuh endpoint is not available for correlation.")
+            asset = form.cleaned_data["asset"]
+            link, created = WazuhEndpointAssetLink.objects.update_or_create(
+                tenant=tenant, hostname=hostname,
+                defaults={"asset": asset, "created_by": request.user},
+            )
+            updated = SecurityFinding.objects.filter(
+                tenant=tenant, source=SecurityFinding.Source.WAZUH,
+                observed_hostname=hostname, asset__isnull=True,
+            ).update(asset=asset)
+            first_finding = SecurityFinding.objects.filter(
+                tenant=tenant, source=SecurityFinding.Source.WAZUH, observed_hostname=hostname,
+            ).order_by("id").first()
+            if first_finding:
+                FindingAuditEvent.objects.create(
+                    finding=first_finding, actor=request.user, action=FindingAuditEvent.Action.UPDATED,
+                    summary=f"Wazuh endpoint correlated to a verified tenant asset; {updated} finding records updated.",
+                )
+            messages.success(request, "Wazuh endpoint correlated to the selected asset. Existing findings now show the asset inventory IP when present.")
+            return redirect("wazuh_endpoint_correlation", slug=tenant.slug)
+    else:
+        form = WazuhEndpointCorrelationForm(tenant=tenant)
+    linked = WazuhEndpointAssetLink.objects.filter(tenant=tenant).select_related("asset")
+    return render(request, "wazuh_endpoint_correlation.html", {
+        "tenant": tenant, "form": form, "unmatched": unmatched, "linked": linked, "is_provider": True,
+    })

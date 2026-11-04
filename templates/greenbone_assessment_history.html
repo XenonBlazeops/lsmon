@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block title %}Greenbone assessment history · {{ tenant.name }}{% endblock %}
+{% block content %}
+<header><div><p class="eyebrow">{{ tenant.name }} security</p><h1>Greenbone assessment history</h1><p class="sub">Audit history for root-only imports of operator-exported Greenbone reports. This page cannot connect to a scanner, create a target, or start a scan.</p></div><a class="button secondary" href="{% url 'security_findings' tenant.slug %}">Back to findings</a></header>
+<section class="panel"><div class="panel-head"><h2>Imported assessment reports</h2><span>Latest 20</span></div><table><thead><tr><th>Status</th><th>Source</th><th>Findings</th><th>Created</th><th>Updated</th><th>Started</th><th>Completed</th></tr></thead><tbody>{% for run in runs %}<tr><td>{{ run.get_status_display }}{% if run.error_code %}<br><span class="muted">{{ run.error_code }}</span>{% endif %}</td><td>Operator-exported report</td><td>{{ run.finding_count }}</td><td>{{ run.created_count }}</td><td>{{ run.updated_count }}</td><td>{{ run.started_at|date:"Y-m-d H:i T" }}</td><td>{{ run.completed_at|date:"Y-m-d H:i T"|default:"—" }}</td></tr>{% empty %}<tr><td colspan="7">No Greenbone report has been imported. No target or scan is implied.</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}
